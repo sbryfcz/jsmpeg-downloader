@@ -1,0 +1,14 @@
+{
+    "name": "jsmpeg-downloader",
+    "version": "1.0.0",
+    "description": "This project can take a stream of jsmpeg data and stream/write it to file",
+    "main": "index.js",
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "author": "",
+    "license": "ISC",
+    "dependencies": {
+        "ws": "^7.2.3"
+    }
+}
