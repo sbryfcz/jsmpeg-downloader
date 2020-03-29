@@ -2527,7 +2527,7 @@ var connect = function () {
     }, 2000);
 
     // Hide notice when connected
-    client.addEventListener('open', function () { setNotice(null); }, false);
+    client.addEventListener('open', function () { }, false);
 };
 
 var setNotice = function (msg) {
