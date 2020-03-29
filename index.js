@@ -1,23 +1,3 @@
-/*
- * AAC.js - Advanced Audio Coding decoder in JavaScript
- * Created by Devon Govett
- * Copyright (c) 2012, Official.fm Labs
- *
- * AAC.js is free software; you can redistribute it and/or modify it 
- * under the terms of the GNU Lesser General Public License as 
- * published by the Free Software Foundation; either version 3 of the 
- * License, or (at your option) any later version.
- *
- * AAC.js is distributed in the hope that it will be useful, but WITHOUT 
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY 
- * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General 
- * Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public
- * License along with this library.
- * If not, see <http://www.gnu.org/licenses/>.
- */
-
 var WebSocket = require('ws');
 var fs = require('fs');
 
@@ -60,16 +40,6 @@ function writeChunk(chunk) {
     // Inspired by "MPEG Decoder in Java ME" by Nokia:
     // http://www.developer.nokia.com/Community/Wiki/MPEG_decoder_in_Java_ME
 
-
-    var requestAnimFrame = (function () {
-        return window.requestAnimationFrame ||
-            window.webkitRequestAnimationFrame ||
-            window.mozRequestAnimationFrame ||
-            function (callback) {
-                window.setTimeout(callback, 1000 / 60);
-            };
-    })();
-
     var jsmpeg = window.jsmpeg = function (url, opts) {
         opts = opts || {};
         this.benchmark = !!opts.benchmark;
@@ -80,7 +50,6 @@ function writeChunk(chunk) {
         this.externalLoadCallback = opts.onload || null;
         this.externalDecodeCallback = opts.ondecodeframe || null;
         this.externalFinishedCallback = opts.onfinished || null;
-        this.unlockAudioElement = opts.unlockAudio || null;
 
         this.customIntraQuantMatrix = new Uint8Array(64);
         this.customNonIntraQuantMatrix = new Uint8Array(64);
@@ -120,30 +89,6 @@ function writeChunk(chunk) {
 
         this.client.binaryType = 'arraybuffer';
         this.client.onmessage = this.receiveSocketMessage.bind(this);
-
-
-        // Setup Audio Decoder
-        this.audioInputBuffer = new BitReader(new ArrayBuffer(this.socketBufferSize));
-        this.audioInputBuffer.writePos = 0;
-
-        if (window.AudioContext) {
-            this.audioCtx = new window.AudioContext();
-        } else if (window.webkitAudioContext) {
-            this.audioCtx = new window.webkitAudioContext();
-        }
-
-        if (this.audioCtx) {
-            if (/iPad|iPhone|iPod/.test(navigator.userAgent)) {
-                //			window.addEventListener('touchstart', this.unlockWebAudio.bind(this), false);
-                if (this.unlockAudioElement) {
-                    this.unlockAudioElement.addEventListener('touchstart', this.unlockWebAudio.bind(this), false);
-                }
-            }
-            else {
-                this.webAudioUnlocked = true;
-                this.initWebAudio();
-            }
-        }
     };
 
     jsmpeg.prototype.decodeSocketHeader = function (data) {
@@ -163,69 +108,8 @@ function writeChunk(chunk) {
     };
 
     jsmpeg.prototype.scriptProcessorSamples = 1024;
-    jsmpeg.prototype.initWebAudio = function () {
-        if (this.audioScriptProc) {
-            this.audioScriptProc.disconnect();
-        }
-        this.audioScriptProc = this.audioCtx.createScriptProcessor
-            ? this.audioCtx.createScriptProcessor(this.scriptProcessorSamples, 1, 1)
-            : this.audioCtx.createJavaScriptNode(this.scriptProcessorSamples, 1, 1);
-
-        this.audioScriptProc.onaudioprocess = this.fillAudioBuffer.bind(this);
-        this.audioScriptProc.connect(this.audioCtx.destination);
-    };
-
-    jsmpeg.prototype.webAudioUnlocked = false;
-    jsmpeg.prototype.unlockWebAudio = function () {
-        if (this.webAudioUnlocked) { return; }
-
-        var buffer = this.audioCtx.createBuffer(1, 22050, 44100);
-        var source = this.audioCtx.createBufferSource();
-        source.buffer = buffer;
-        source.connect(this.audioCtx.destination);
-        source.noteOn(0);
-
-        var that = this;
-        setTimeout(function () {
-            if (
-                source.playbackState === source.PLAYING_STATE ||
-                source.playbackState === source.FINISHED_STATE
-            ) {
-                if (that.unlockAudioElement) {
-                    that.unlockAudioElement.style.display = 'none';
-                }
-                that.webAudioUnlocked = true;
-                that.initWebAudio();
-            }
-        }, 100);
-    };
 
     jsmpeg.prototype.fillPos = 0;
-    jsmpeg.prototype.fillAudioBuffer = function (ev) {
-
-        var source = this.decodedAudioBuffer;
-        var dest = ev.outputBuffer.getChannelData(0);
-
-        if (source.length < dest.length) {
-            for (var i = 0; i < dest.length; i++) {
-                dest[i] = 0;
-            }
-            //		console.log('audio buffer starved', source.length)
-            return;
-        }
-
-        var start = 0;
-        if (source.length > dest.length * 3) {
-            start = source.length - dest.length * 2;
-            //		console.log('audio buffer overflowed', source.length, start);
-        }
-
-        dest.set(source.subarray(start, dest.length));
-        this.decodedAudioBuffer = this.decodedAudioBuffer.subarray(start + dest.length);
-    };
-
-    jsmpeg.prototype.audioScriptProc = null;
-    jsmpeg.prototype.decodedAudioBuffer = new Float32Array();
 
     jsmpeg.prototype.concatFloat32Arrays = function (a1, a2) {
         var tmp = new Float32Array(a1.length + a2.length);
@@ -248,7 +132,7 @@ function writeChunk(chunk) {
         if (
             messageData.length >= 8 && messageData[0] === 0x00 &&
             messageData[1] === 0x00 && messageData[2] === 0x01 &&
-            (messageData[3] === START_PACKET_VIDEO || messageData[3] === START_PACKET_AUDIO)
+            (messageData[3] === START_PACKET_VIDEO)
         ) {
             this.currentPacketType = messageData[3];
             this.currentPacketLength =
@@ -265,37 +149,6 @@ function writeChunk(chunk) {
                 this.decodePicture();
                 this.buffer.index = 0;
                 this.buffer.writePos = 0;
-            }
-        }
-
-        else if (this.currentPacketType == START_PACKET_AUDIO) {
-            this.audioInputBuffer.bytes.set(messageData, this.audioInputBuffer.writePos);
-            this.audioInputBuffer.writePos += messageData.length;
-
-            if (this.audioInputBuffer.writePos >= this.currentPacketLength) {
-                var bytes = new Uint8Array(this.audioInputBuffer.bytes.buffer, 8, this.currentPacketLength);
-                var reader = new BitReader(bytes);
-                var decodedChunk = this.aacDecoder.readChunk(reader);
-
-                // Do we have to resample?
-                if (this.audioCtx.sampleRate !== 44100) {
-                    if (!this.resampler) {
-                        var resampleBufferLength = decodedChunk.length * (this.audioCtx.sampleRate / 44100);
-                        this.resampler = new Resampler(44100, this.audioCtx.sampleRate, 1, resampleBufferLength);
-                    }
-                    this.decodedAudioBuffer = this.concatFloat32Arrays(this.decodedAudioBuffer, this.resampler.resample(decodedChunk));
-                }
-                else {
-                    this.decodedAudioBuffer = this.concatFloat32Arrays(this.decodedAudioBuffer, decodedChunk);
-                }
-
-                this.audioInputBuffer.writePos = 0;
-            }
-
-            // Web Audio not unlocked and we want to show the unlock element?
-            if (!this.webAudioUnlocked && this.unlockAudioElement && !this.unlockAudioElementVisible) {
-                this.unlockAudioElementVisible = true;
-                this.unlockAudioElement.style.display = 'block';
             }
         }
     };
@@ -2483,7 +2336,6 @@ function writeChunk(chunk) {
         START_EXTENSION = 0xB5,
         START_USER_DATA = 0xB2,
         START_PACKET_VIDEO = 0xFA,
-        START_PACKET_AUDIO = 0xFB,
 
         // Shaders for accelerated WebGL YCbCrToRGBA conversion
         SHADER_FRAGMENT_YCBCRTORGBA = [
@@ -2679,13 +2531,6 @@ var connect = function () {
 };
 
 var setNotice = function (msg) {
-    // if( !msg ) {
-    // 	notice.style.display = 'none';
-    // }
-    // else {
-    // 	notice.style.display = 'block';
-    // 	noticeText.innerHTML = msg;
-    // }
     console.log(msg);
 };
 
@@ -2698,143 +2543,13 @@ var attemptReconnect = function (event) {
     setNotice('Lost connection');
 };
 
-
-// ------------------------------------------------------
-// Recording
-
-// var recordButton = document.getElementById('record');
-// var recordDot = document.getElementById('recordDot');
-// var recordNotice = document.getElementById('recordNotice');
-// var recordStats = document.getElementById('recordStats');
-// var recordLinkBox = document.getElementById('recordLinkBox');
-// var recordLink = document.getElementById('recordLink');
-var recordButton = {
-    className: 'available'
-};
-
-var recordingStatsInterval = 0;
-var recordingLastURL = null;
-// recordButton.onclick = function(ev) {
-// 	ev.preventDefault();
-// 	ev.stopPropagation();
-// 	if( !player.canRecord() ) { return false; }
-
-// 	if( !canRecord() ) {
-// 		document.getElementById('recordDisabled').style.display = 'inline';
-// 		return false;
-// 	}
-
-// 	if( recordButton.className == 'available' ) {
-// 		recordButton.className = 'waiting';
-// 		startRecording();
-// 	}
-// 	else if( recordButton.className == 'recording' ) {
-// 		recordButton.className = 'available';
-// 		stopRecordingAndDownload();
-// 	}
-// 	return false;
-// };
-
-var canRecord = function () {
-    return (window.URL && window.URL.createObjectURL);
-};
-
-var startRecording = function () {
-    setRecordingState(true);
-    recordLinkBox.style.display = 'none';
-
-    if (recordingLastURL) {
-        if (window.URL && window.URL.revokeObjectURL) {
-            window.URL.revokeObjectURL(recordingLastURL);
-        }
-        else if (window.webkitURL && window.webkitURL.revokeObjectURL) {
-            window.webkitURL.revokeObjectURL(recordingLastURL);
-        }
-        recordingLastURL = null;
-    }
-    recordLink.href = '#';
-    player.startRecording(recordingDidStart);
-    return false;
-};
-
-var recordingDidStart = function (player) {
-    // recordNotice.innerHTML = 'Recording (Video only)';
-    // recordButton.className = 'recording';
-    // recordStats.style.display = 'inline';
-    recordingStatsInterval = setInterval(recordStatsUpdate, 33);
-};
-
 var recordStatsUpdate = function () {
     var size = (player.recordedSize / 1024 / 1024).toFixed(2);
-    recordStats.innerHTML = '(' + size + 'mb)';
+    var message = '(' + size + 'mb)';
+    process.stdout.write(message + '\r');
 };
-
-var stopRecordingAndDownload = function () {
-    recordStats.style.display = 'none';
-    clearInterval(recordingStatsInterval);
-    setRecordingState(false);
-
-    var today = new Date();
-    var dd = today.getDate();
-    dd = (dd < 10 ? '0' : '') + dd;
-    var mm = today.getMonth() + 1;
-    mm = (mm < 10 ? '0' : '') + mm;
-    var yyyy = today.getFullYear();
-    var hh = today.getHours();
-    hh = (hh < 10 ? '0' : '') + hh;
-    var ii = today.getMinutes();
-    ii = (ii < 10 ? '0' : '') + ii;
-
-    var fileName = 'Webcam-' + yyyy + '-' + mm + '-' + dd + '-' + hh + '-' + ii + '.mpg';
-    var size = (player.recordedSize / 1024 / 1024).toFixed(2);
-
-
-    recordLink.innerHTML = fileName + ' (' + size + 'mb)';
-    recordLink.download = fileName;
-
-    var blob = player.stopRecording();
-    recordingLastURL = window.URL.createObjectURL(blob);
-    recordLink.href = recordingLastURL;
-    recordLinkBox.style.display = 'inline';
-};
-
-var recorderLostConnection = function () {
-    if (recordButton.className == 'recording') {
-        recordButton.className = 'available';
-        stopRecordingAndDownload();
-    }
-};
-
-var setRecordingState = function (enabled) {
-    recordDot.innerHTML = enabled ? '&#x25cf;' : '&#x25cb;';
-    recordNotice.innerHTML = enabled ? 'Recording' : 'Record';
-};
-
-
-// ------------------------------------------------------
-// Init!
-
-// if( navigator.userAgent.match(/iPhone|iPod|iPad|iOS/i) ) {
-// 	// Don't show recording button on iOS devices. Desktop browsers unable
-// 	// of recording, will see a message when the record button is clicked.
-// 	document.getElementById('record').style.display = 'none';
-// }
-
-// canvas.addEventListener('click', function(){
-// 	canvas.className = (canvas.className == 'full' ? 'unscaled' : 'full');
-// 	return false;
-// },false);
-
-// if( !window.WebSocket ) {
-// 	setNotice("Your Browser doesn't Support WebSockets. Please use Firefox, Chrome, Safari or IE10");
-// }
-// else {
-// setNotice('Connecting');
-
 
 connect();
 player.startRecording();
-// }
 
-// })(window);
-
+setInterval(recordStatsUpdate, 1000);
